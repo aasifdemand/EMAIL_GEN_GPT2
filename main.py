@@ -1,0 +1,66 @@
+from fastapi import FastAPI, Query
+from services.email_analyzer import analyze_email
+from services.email_generator import generate_email, generate_reply
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+app = FastAPI(title="Email Warmup")
+
+# --- CORS setup ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*", "http://localhost:5173", "http://localhost:5000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Analyzer request model ---
+class EmailRequest(BaseModel):
+    subject: str = ""
+    body: str
+
+# ----------------- ANALYZER -----------------
+@app.post("/analyze")
+def analyze(email: EmailRequest):
+    text = f"{email.subject}\n\n{email.body}"
+    result = analyze_email(text, email.subject)
+    return {"subject": email.subject, "result": result}
+
+# ----------------- GENERATE EMAIL -----------------
+@app.get("/generate-email")
+async def api_generate_email(
+    sender_email: str,
+    receiver_email: str,
+    industry: str = Query("", description="Optional industry name"),
+    target_role: str = Query("", description="Optional target role"),
+    tone: str = Query("professional", description="Email tone"),
+    purpose: str = Query("follow_up", description="Purpose of email")
+):
+    """Generate a professional cold/warm email."""
+    result = await generate_email(
+        sender_email=sender_email,
+        receiver_email=receiver_email,
+        industry=industry,
+        target_role=target_role,
+        tone=tone,
+        purpose=purpose
+    )
+    return result
+
+# ----------------- GENERATE REPLY -----------------
+@app.post("/generate-reply")
+async def api_generate_reply(
+    original_email: str,
+    replier_email: str,
+    original_sender_email: str,
+    tone: str = Query("professional", description="Tone of reply")
+):
+    """Generate a professional reply to an incoming message."""
+    result = await generate_reply(
+        original_email=original_email,
+        replier_email=replier_email,
+        original_sender_email=original_sender_email,
+        tone=tone
+    )
+    return result
