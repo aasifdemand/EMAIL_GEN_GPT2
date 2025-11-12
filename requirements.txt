@@ -16,3 +16,4 @@ torchvision
 torchaudio
 tqdm
 python-dotenv
+uvicorn
