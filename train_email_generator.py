@@ -1,6 +1,4 @@
 import os
-import re
-import math
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -9,7 +7,7 @@ from tqdm import tqdm
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
 # === TRAINING CONFIG ===
-NUM_EMAILS = 500         # Train on 3000 diverse emails from comprehensive dataset
+NUM_EMAILS = 3000         # Train on 3000 diverse emails from comprehensive dataset
 MAX_LENGTH = 256          # Increased for longer, more realistic emails
 BATCH_SIZE = 4            # Better batch size for training
 NUM_EPOCHS = 2            # More epochs for better learning

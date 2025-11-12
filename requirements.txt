@@ -5,13 +5,14 @@
 
 scikit-learn
 transformers
-#torch
+torch
 textstat
 joblib
 pandas
 numpy
 accelerate
 datasets
-#torchvision
-#torchaudio
+torchvision
+torchaudio
 tqdm
+python-dotenv

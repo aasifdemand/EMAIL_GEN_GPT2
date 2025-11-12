@@ -2,11 +2,22 @@ import os
 import random
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from dotenv import load_dotenv
 
-MODEL_NAME = "Aasif1234/email_gpt2"  # Hugging Face repo name
 
-tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
-model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
+load_dotenv()
+hf_token=os.getenv("HUGGINGFACE_TOKEN")
+
+try:
+    MODEL_NAME = "Aasif1234/email_gpt2"
+    tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME,token=hf_token)
+    model = GPT2LMHeadModel.from_pretrained(MODEL_NAME,token=hf_token)
+    print("✅ Successfully loaded fine-tuned model from Hugging Face!")
+except Exception as e:
+    MODEL_NAME = "gpt2"
+    tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
+    model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
+
 model.eval()
 
 
