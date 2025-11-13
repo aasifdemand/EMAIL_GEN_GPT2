@@ -17,4 +17,8 @@ torchaudio
 tqdm
 python-dotenv
 uvicorn
+bs4
+emoji
+tldextract
+
 # "fastapi[standard]"
