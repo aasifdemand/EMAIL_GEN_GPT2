@@ -3,7 +3,9 @@ import requests
 import random
 import joblib
 import re
+import hashlib
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
@@ -23,119 +25,67 @@ except Exception as e:
     spam_model = None
     vectorizer = None
 
-# Spam trigger words for prevention
-SPAM_TRIGGER_WORDS = {
-    "free": ["complimentary", "no cost", "at no charge"],
-    "winner": ["selected", "chosen", "eligible"],
-    "urgent": ["important", "priority", "time-sensitive"],
-    "buy now": ["learn more", "explore", "discover"],
-    "discount": ["special offer", "opportunity", "value"],
-    "cash": ["reward", "benefit", "advantage"],
-    "prize": ["recognition", "achievement", "honor"],
-    "guaranteed": ["assured", "reliable", "dependable"],
-    "act now": ["get started", "begin today", "take action"],
-    "limited time": ["available now", "current opportunity", "present chance"]
-}
+# Template patterns with ONLY BR tags - NO \n
+TEMPLATE_PATTERNS = [
+    {
+        "name": "problem_empathy",
+        "structure": "{greeting}<br><br>I hope things are going smoothly for you.<br><br>{challenge_context} and I am sure you must be putting in your best efforts to manage it effectively. {value_proposition}<br><br>{call_to_action}<br><br>I hope you have an enjoyable and productive day.<br><br>{closing}<br>{sender_name}"
+    },
+    {
+        "name": "collaboration_discussion", 
+        "structure": "{greeting}<br><br>I hope this message finds you well.<br><br>{industry_context} and I believe there could be some interesting opportunities worth exploring together. {specific_insight}<br><br>{invitation}<br><br>Wishing you all the best.<br><br>{closing}<br>{sender_name}"
+    },
+    {
+        "name": "value_exchange",
+        "structure": "{greeting}<br><br>Hope you're having a productive week.<br><br>{field_observation} particularly regarding {target_focus}. {perspective_share}<br><br>{connection_request}<br><br>Best regards,<br><br>{sender_name}"
+    }
+]
 
-# ----------------- HELPERS -----------------
-def _safe_field(value: str, default: str):
-    """Clean up undefined, none, or empty values."""
+# Natural components for dynamic generation
+GREETINGS = ["Hello {name},", "Hi {name},", "Dear {name},"]
+CLOSINGS = ["Best regards,", "Sincerely,", "Kind regards,", "Warm regards,"]
+
+# ----------------- DYNAMIC TEMPLATE-BASED GENERATION -----------------
+def _get_sender_name(email: str) -> str:
+    """Extract sender name from email"""
+    if email and "@" in email:
+        name_part = email.split("@")[0]
+        name = re.sub(r'[0-9_\-\.]+', ' ', name_part)
+        name = name.strip().title()
+        if name and len(name) > 1:
+            return name
+    return "Team"
+
+def _generate_unique_id(sender_email: str, receiver_email: str, industry: str, purpose: str) -> str:
+    """Generate unique ID for variation"""
+    base_string = f"{sender_email}{receiver_email}{industry}{purpose}{datetime.now().strftime('%f')}"
+    return hashlib.md5(base_string.encode()).hexdigest()[:12]
+
+def _safe_field(value: str, default: str) -> str:
+    """Clean up undefined values"""
     if not value or str(value).strip().lower() in ["undefined", "none", "null", ""]:
         return default
     return value.strip()
 
-def _random_tagline():
-    return random.choice([
-        "Business Development Team",
-        "Growth Specialist", 
-        "Client Success Manager",
-        "Marketing Executive",
-        "Strategic Outreach Team",
-    ])
+def _remove_all_newlines(text: str) -> str:
+    """Remove ALL newline characters completely"""
+    return text.replace('\n', ' ').replace('\r', ' ').strip()
 
-def _random_variation():
-    """Introduce small random style variation for diversity."""
-    return random.choice([
-        "short and professional",
-        "concise yet friendly", 
-        "warm and engaging",
-        "polished and respectful",
-        "approachable and courteous",
-    ])
-
-def _is_spammy_content(text: str) -> bool:
-    """Check if content is spammy using the ML model"""
-    if spam_model is None or vectorizer is None:
-        # Fallback: basic spam word check
-        text_lower = text.lower()
-        spam_words_found = [word for word in SPAM_TRIGGER_WORDS.keys() if word in text_lower]
-        return len(spam_words_found) > 2
-    
-    try:
-        # Use ML model for spam detection
-        X = vectorizer.transform([text])
-        spam_probability = spam_model.predict_proba(X)[0][1]
-        return spam_probability > 0.6  # Threshold for spam detection
-    except:
-        return False
-
-def _create_anti_spam_prompt(base_prompt: str) -> str:
-    """Add anti-spam instructions to the prompt"""
-    anti_spam_instructions = (
-        "\n\nIMPORTANT: Avoid spam trigger words like 'free', 'winner', 'urgent', 'buy now', 'discount', "
-        "'cash', 'prize', 'guaranteed', 'act now', 'limited time'. Use professional business language "
-        "that sounds natural and trustworthy. Focus on value and collaboration, not sales pressure."
-    )
-    return base_prompt + anti_spam_instructions
-
-def _enhance_content(text: str) -> str:
-    """Replace any spammy words that might have slipped through"""
-    enhanced_text = text
-    for spam_word, alternatives in SPAM_TRIGGER_WORDS.items():
-        if spam_word in enhanced_text.lower():
-            replacement = random.choice(alternatives)
-            enhanced_text = re.sub(
-                re.escape(spam_word), 
-                replacement, 
-                enhanced_text, 
-                flags=re.IGNORECASE
-            )
-    return enhanced_text
-
-def _improve_tone(text: str) -> str:
-    """Improve overall email tone"""
-    improvements = [
-        (r'\b(immediately|right away)\b', 'promptly'),
-        (r'\b(cheap|low cost)\b', 'cost-effective'),
-        (r'\b(huge|massive)\b', 'significant'),
-        (r'\b(amazing|incredible)\b', 'valuable'),
-        (r'\b(never\s+before|unique)\b', 'distinctive'),
-    ]
-    
-    improved_text = text
-    for pattern, replacement in improvements:
-        improved_text = re.sub(pattern, replacement, improved_text, flags=re.IGNORECASE)
-    
-    return improved_text
-
-async def _generate_text(prompt: str, max_new_tokens: int = 85) -> str:
-    """Generate text using Hugging Face Inference API with anti-spam prompt"""
-    # Add anti-spam instructions to prevent spammy generation
-    safe_prompt = _create_anti_spam_prompt(prompt)
-    
+async def _generate_dynamic_component(prompt: str, max_tokens: int = 40) -> str:
+    """Generate dynamic content for template components - NO NEWLINES"""
     payload = {
-        "inputs": safe_prompt,
+        "inputs": prompt,
         "parameters": {
-            "max_new_tokens": max_new_tokens,
-            "temperature": 0.7,  # Lower temperature for more focused output
-            "top_p": 0.85,
+            "max_new_tokens": max_tokens,
+            "temperature": 0.8,
+            "top_p": 0.9,
             "do_sample": True,
             "return_full_text": False,
-            "repetition_penalty": 1.2
+            "repetition_penalty": 1.3,
         },
         "options": {
             "wait_for_model": True,
-            "use_cache": True
+            "use_cache": False
         }
     }
     
@@ -145,68 +95,111 @@ async def _generate_text(prompt: str, max_new_tokens: int = 85) -> str:
         if response.status_code == 200:
             result = response.json()
             if isinstance(result, list) and len(result) > 0:
-                generated_text = result[0]['generated_text'].strip()
-                # Quick enhancement to catch any remaining spammy words
-                return _enhance_content(generated_text)
+                generated = result[0]['generated_text'].strip()
+                # REMOVE ALL NEWLINES from generated content
+                return _remove_all_newlines(generated)
         
-        return await _fallback_generation(prompt)
+        return await _fallback_component(prompt)
         
     except Exception as e:
         print(f"API Error: {e}")
-        return await _fallback_generation(prompt)
+        return await _fallback_component(prompt)
 
-async def _fallback_generation(prompt: str) -> str:
-    """Smart fallback when model is unavailable - guaranteed spam-free"""
-    if "subject" in prompt.lower():
-        subjects = [
-            "Following up on our conversation",
-            "Quick update regarding your inquiry",
-            "Opportunity for collaboration", 
-            "Connecting as discussed",
-            "Follow-up on recent discussion"
-        ]
-        return random.choice(subjects)
+async def _fallback_component(prompt: str) -> str:
+    """Fallback components - NO NEWLINES"""
+    if "challenge" in prompt.lower():
+        return "Managing current industry challenges requires careful attention"
+    elif "value" in prompt.lower():
+        return "I wanted to share some perspectives that might be helpful"
+    elif "insight" in prompt.lower():
+        return "There are some interesting developments worth considering"
+    elif "invitation" in prompt.lower():
+        return "Would you have some time to discuss this further"
     else:
-        professional_responses = [
-            "I hope this message finds you well. I wanted to follow up on our recent conversation and explore potential opportunities for collaboration.",
-            "Thank you for your time recently. I've been considering our discussion and wanted to share some thoughts on how we might work together.",
-            "I appreciate the opportunity to connect with you. Following our conversation, I wanted to propose some next steps for our potential collaboration.",
-            "It was great speaking with you. I've been reflecting on our discussion and believe there are meaningful opportunities we could explore together."
-        ]
-        return random.choice(professional_responses)
+        return "I appreciate the opportunity to connect"
 
-async def _generate_subject(sender_email, receiver_email, industry, purpose):
-    """Generate realistic short subject line with anti-spam protection"""
-    sender_prefix = sender_email.split("@")[0].capitalize()
-    receiver_prefix = receiver_email.split("@")[0].capitalize()
-
-    examples = [
-        f"{receiver_prefix}, let's discuss {purpose}",
-        f"Quick idea for {industry}",
-        f"Exploring {purpose} in {industry}",
-        f"{sender_prefix} here – opportunity in {industry}",
-        f"Connecting about {purpose}",
-    ]
-
-    base_prompt = (
-        f"Write a short and natural business email subject (under 8 words).\n"
-        f"From: {sender_email}\nTo: {receiver_email}\n"
-        f"Industry: {industry}\nPurpose: {purpose}\n"
-        f"Examples:\n" + "\n".join(f"- {s}" for s in examples) + "\nSubject:"
-    )
-
-    subject = await _generate_text(base_prompt, max_new_tokens=12)
-    subject = subject.split("\n")[0].strip().rstrip(".!?")
-
-    if not subject or len(subject) < 5:
-        subject = random.choice(examples)
-
-    subject += f" – {random.choice(['Note', 'Intro', 'Insight'])}"
+async def _generate_dynamic_email(template_pattern: dict, receiver_name: str, sender_name: str, industry: str, target_role: str, purpose: str, unique_id: str) -> str:
+    """Generate dynamic email using template structure with ONLY BR tags"""
+    local_random = random.Random(int(unique_id, 16))
     
-    # Final spam check and enhancement
-    return _enhance_content(subject)
+    # Generate dynamic components
+    greeting = local_random.choice(GREETINGS).format(name=receiver_name)
+    closing = local_random.choice(CLOSINGS)
+    
+    # Generate dynamic content for each template slot
+    challenge_prompt = f"Write a brief sentence about challenges in {industry} for {target_role}:"
+    challenge_context = await _generate_dynamic_component(challenge_prompt, 25)
+    
+    value_prompt = f"Write a helpful perspective about {industry} and {target_role}:"
+    value_proposition = await _generate_dynamic_component(value_prompt, 30)
+    
+    action_prompt = f"Write a polite invitation to discuss {purpose} in {industry}:"
+    call_to_action = await _generate_dynamic_component(action_prompt, 20)
+    
+    # Use template structure with dynamic content and ONLY BR tags
+    email_body = template_pattern["structure"].format(
+        greeting=greeting,
+        challenge_context=challenge_context,
+        value_proposition=value_proposition,
+        call_to_action=call_to_action,
+        closing=closing,
+        sender_name=sender_name,
+        industry_context=f"Our discussion about {industry} has been on my mind",
+        specific_insight="I've been considering how recent developments might align with your approach",
+        invitation="Would you be available for a conversation in the coming week",
+        field_observation=f"I've been following developments in {industry}",
+        target_focus=target_role,
+        perspective_share="I have some thoughts that might be relevant to your work",
+        connection_request="Might you have some time to connect and discuss this further"
+    )
+    
+    return email_body
 
-# ----------------- EMAIL GENERATOR -----------------
+async def _generate_dynamic_subject(industry: str, target_role: str, purpose: str, unique_id: str) -> str:
+    """Generate dynamic subject line - NO NEWLINES"""
+    subject_prompts = [
+        f"Write a professional email subject about {purpose} in {industry}:",
+        f"Create a business subject line for discussing {industry} with {target_role}:",
+        f"Generate a professional subject for {purpose} regarding {target_role}:"
+    ]
+    
+    local_random = random.Random(int(unique_id, 16))
+    prompt = local_random.choice(subject_prompts)
+    
+    subject = await _generate_dynamic_component(prompt, 15)
+    subject = subject.split('.')[0].strip()  # Take first sentence only
+    
+    # Clean up subject - REMOVE ALL NEWLINES
+    subject = _remove_all_newlines(subject)
+    subject = re.sub(r'[^a-zA-Z0-9\s\-]', '', subject)
+    if not subject or len(subject) < 5:
+        subject = f"Following up on {industry} discussion"
+    
+    return subject
+
+def _create_html_email(body_content: str) -> str:
+    """Create HTML email with proper structure"""
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+    </style>
+</head>
+<body>
+    {body_content}
+</body>
+</html>"""
+
+# ----------------- DYNAMIC TEMPLATE-BASED GENERATOR -----------------
 async def generate_email(
     sender_email: str,
     receiver_email: str,
@@ -215,99 +208,65 @@ async def generate_email(
     tone: str = "professional",
     purpose: str = "collaboration"
 ):
-    """Generate email with built-in spam prevention"""
+    """Generate dynamic emails using template patterns as guidance"""
+    unique_id = _generate_unique_id(sender_email, receiver_email, industry, purpose)
+    
     sender_email = _safe_field(sender_email, "team@example.com")
     receiver_email = _safe_field(receiver_email, "client@example.com")
     industry = _safe_field(industry, "your field")
-    target_role = _safe_field(target_role, "your team")
-    tone = _safe_field(tone, "professional")
+    target_role = _safe_field(target_role, "your role")
     purpose = _safe_field(purpose, "collaboration")
 
-    variation = _random_variation()
+    # Get names
+    receiver_name = receiver_email.split("@")[0].capitalize()
+    sender_name = _get_sender_name(sender_email)
     
-    # Generate subject with anti-spam protection
-    subject = await _generate_subject(sender_email, receiver_email, industry, purpose)
-
-    # Create prompt with anti-spam instructions built-in
-    prompt = (
-        f"Write a {variation} {tone} outreach email (max 5 sentences) for {purpose}.\n"
-        f"Use the format:\n"
-        f"1. Greeting\n2. One-line purpose intro\n3. 2–3 sentence main paragraph about benefits or ideas\n"
-        f"4. Call to action line\n5. Closing.\n\n"
-        f"From: {sender_email}\nTo: {receiver_email}\n"
-        f"Industry: {industry}\nTarget Role: {target_role}\n\nEmail:\n"
-    )
-
-    # Generate body with anti-spam protection
-    body = await _generate_text(prompt, max_new_tokens=80)
-    body = " ".join(line.strip() for line in body.splitlines() if line.strip())
-    body = body.replace("undefined", "").replace("  ", " ")
-
-    if not body.lower().startswith(("hi", "hello")):
-        name = receiver_email.split("@")[0].capitalize()
-        body = f"Hi {name}, {body}"
-
-    # Final tone improvement
-    body = _improve_tone(body)
-
-    signature = f"<br><br>Best regards,<br>{sender_email}<br>{_random_tagline()}"
-
-    body_html = (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        "<style>"
-        "body {font-family: Arial, sans-serif; line-height:1.6; color:#333; "
-        "max-width:600px; margin:0 auto; padding:20px;}"
-        "p {margin-bottom:15px; text-align:justify;}"
-        ".signature {margin-top:20px; font-weight:bold;}"
-        "</style></head><body>"
-        f"<p>{body}</p>"
-        f"<div class='signature'>{signature}</div>"
-        "</body></html>"
-    )
+    # Select template pattern
+    local_random = random.Random(int(unique_id, 16))
+    template_pattern = local_random.choice(TEMPLATE_PATTERNS)
+    
+    # Generate dynamic content using template structure
+    subject = await _generate_dynamic_subject(industry, target_role, purpose, unique_id)
+    body_with_br = await _generate_dynamic_email(template_pattern, receiver_name, sender_name, industry, target_role, purpose, unique_id)
+    
+    # Create final HTML email
+    body_html = _create_html_email(body_with_br)
     
     return {
         "subject": subject, 
         "body_html": body_html
     }
 
-# ----------------- REPLY GENERATOR -----------------
+# ----------------- DYNAMIC REPLY GENERATOR -----------------
 async def generate_reply(
     original_email: str,
     replier_email: str, 
     original_sender_email: str,
     tone: str = "professional"
 ):
-    """Generate reply with built-in spam prevention"""
+    """Generate dynamic replies with ONLY BR tags"""
+    unique_id = _generate_unique_id(replier_email, original_sender_email, "reply", tone)
+    
     replier_email = _safe_field(replier_email, "our-team@example.com")
     original_sender_email = _safe_field(original_sender_email, "client@example.com")
     original_email = _safe_field(original_email, "your previous email")
 
-    prompt = (
-        f"Write a short, {tone} reply (3–4 sentences) to this email.\n"
-        f"Be polite, acknowledge the message, show appreciation, and suggest next steps.\n\n"
-        f"Original email:\n{original_email}\n\nReply:\n"
-    )
-
-    reply_text = await _generate_text(prompt, max_new_tokens=70)
-    reply_text = " ".join(line.strip() for line in reply_text.splitlines() if line.strip())
-    reply_text = reply_text.replace("undefined", "")
-
-    signature = f"<br><br>Best regards,<br>{replier_email}<br>{_random_tagline()}"
-
-    reply_html = (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        "<style>"
-        "body {font-family: Arial, sans-serif; line-height:1.6; color:#333; "
-        "max-width:600px; margin:0 auto; padding:20px;}"
-        "p {margin-bottom:15px; text-align:justify;}"
-        ".signature {margin-top:20px; font-weight:bold;}"
-        "</style></head><body>"
-        f"<p>{reply_text}</p>"
-        f"<div class='signature'>{signature}</div>"
-        "</body></html>"
-    )
-
-    subject = f"Re: {original_sender_email.split('@')[0].capitalize()} – Follow-up"
+    # Get names
+    receiver_name = original_sender_email.split("@")[0].capitalize()
+    sender_name = _get_sender_name(replier_email)
+    
+    # Generate dynamic reply
+    reply_prompt = f"Write a professional reply acknowledging a message and suggesting follow-up:"
+    reply_content = await _generate_dynamic_component(reply_prompt, 50)
+    
+    greeting = random.choice(GREETINGS).format(name=receiver_name)
+    closing = random.choice(CLOSINGS)
+    
+    # Use ONLY BR tags - NO NEWLINES
+    reply_with_br = f"{greeting}<br><br>{reply_content}<br><br>{closing}<br>{sender_name}"
+    
+    reply_html = _create_html_email(reply_with_br)
+    subject = "Re: Your message"
 
     return {
         "subject": subject, 
