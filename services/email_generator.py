@@ -1,25 +1,12 @@
 import os
+import requests
 import random
-import torch
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from dotenv import load_dotenv
 
-
 load_dotenv()
-hf_token=os.getenv("HUGGINGFACE_TOKEN")
-
-try:
-    MODEL_NAME = "Aasif1234/email_gpt2"
-    tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME,token=hf_token)
-    model = GPT2LMHeadModel.from_pretrained(MODEL_NAME,token=hf_token)
-    print("✅ Successfully loaded fine-tuned model from Hugging Face!")
-except Exception as e:
-    MODEL_NAME = "gpt2"
-    tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
-    model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
-
-model.eval()
-
+HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+API_URL = "https://api-inference.huggingface.co/models/Aasif1234/email_gpt2"
+HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 
 # ----------------- HELPERS -----------------
 def _safe_field(value: str, default: str):
@@ -28,46 +15,70 @@ def _safe_field(value: str, default: str):
         return default
     return value.strip()
 
-
 def _random_tagline():
     return random.choice([
         "Business Development Team",
-        "Growth Specialist",
+        "Growth Specialist", 
         "Client Success Manager",
         "Marketing Executive",
         "Strategic Outreach Team",
     ])
 
-
 def _random_variation():
     """Introduce small random style variation for diversity."""
     return random.choice([
         "short and professional",
-        "concise yet friendly",
+        "concise yet friendly", 
         "warm and engaging",
         "polished and respectful",
         "approachable and courteous",
     ])
 
-
 async def _generate_text(prompt: str, max_new_tokens: int = 85) -> str:
-    """Generate text using fine-tuned GPT-2."""
-    inputs = tokenizer(prompt, return_tensors="pt")
-    input_len = inputs["input_ids"].shape[1]
+    """Generate text using Hugging Face Inference API - ZERO local memory"""
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": max_new_tokens,
+            "temperature": 0.9,
+            "top_p": 0.92,
+            "do_sample": True,
+            "return_full_text": False
+        },
+        "options": {
+            "wait_for_model": True,
+            "use_cache": True
+        }
+    }
+    
+    try:
+        response = requests.post(API_URL, headers=HEADERS, json=payload)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if isinstance(result, list) and len(result) > 0:
+                return result[0]['generated_text'].strip()
+        
+        # Fallback if API fails
+        return await _fallback_generation(prompt)
+        
+    except Exception as e:
+        print(f"API Error: {e}")
+        return await _fallback_generation(prompt)
 
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=0.9,
-            top_p=0.92,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id,
-        )
-
-    text = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True)
-    return text.strip()
-
+async def _fallback_generation(prompt: str) -> str:
+    """Smart fallback when model is unavailable"""
+    if "subject" in prompt.lower():
+        subjects = [
+            "Following up on our conversation",
+            "Quick update regarding your inquiry",
+            "Opportunity for collaboration", 
+            "Connecting as discussed",
+            "Follow-up on recent discussion"
+        ]
+        return random.choice(subjects)
+    else:
+        return "I hope this message finds you well. I wanted to follow up on our recent conversation and explore potential opportunities for collaboration."
 
 async def _generate_subject(sender_email, receiver_email, industry, purpose):
     """Generate realistic short subject line."""
@@ -98,13 +109,12 @@ async def _generate_subject(sender_email, receiver_email, industry, purpose):
     subject += f" – {random.choice(['Note', 'Intro', 'Insight'])}"
     return subject
 
-
 # ----------------- EMAIL GENERATOR -----------------
 async def generate_email(
     sender_email: str,
     receiver_email: str,
     industry: str,
-    target_role: str,
+    target_role: str, 
     tone: str = "professional",
     purpose: str = "collaboration"
 ):
@@ -152,11 +162,10 @@ async def generate_email(
 
     return {"subject": subject, "body_html": body_html}
 
-
 # ----------------- REPLY GENERATOR -----------------
 async def generate_reply(
     original_email: str,
-    replier_email: str,
+    replier_email: str, 
     original_sender_email: str,
     tone: str = "professional"
 ):
