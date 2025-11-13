@@ -17,4 +17,4 @@ torchaudio
 tqdm
 python-dotenv
 uvicorn
-"fastapi[standard]"
+# "fastapi[standard]"
