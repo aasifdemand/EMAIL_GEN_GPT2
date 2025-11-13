@@ -3,6 +3,7 @@ from services.email_analyzer import analyze_email
 from services.email_generator import generate_email, generate_reply
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import os
 
 app = FastAPI(title="Email Warmup")
 
@@ -64,3 +65,8 @@ async def api_generate_reply(
         tone=tone
     )
     return result
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
