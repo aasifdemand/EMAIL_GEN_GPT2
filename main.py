@@ -29,6 +29,8 @@ def analyze(email: EmailRequest):
     return {"subject": email.subject, "result": result}
 
 # ----------------- GENERATE EMAIL -----------------
+# In your main.py, update the endpoints to handle the enhanced responses:
+
 @app.get("/generate-email")
 async def api_generate_email(
     sender_email: str,
@@ -38,7 +40,7 @@ async def api_generate_email(
     tone: str = Query("professional", description="Email tone"),
     purpose: str = Query("follow_up", description="Purpose of email")
 ):
-    """Generate a professional cold/warm email."""
+    """Generate a professional email with quality analysis."""
     result = await generate_email(
         sender_email=sender_email,
         receiver_email=receiver_email,
@@ -49,7 +51,6 @@ async def api_generate_email(
     )
     return result
 
-# ----------------- GENERATE REPLY -----------------
 @app.post("/generate-reply")
 async def api_generate_reply(
     original_email: str,
@@ -57,7 +58,7 @@ async def api_generate_reply(
     original_sender_email: str,
     tone: str = Query("professional", description="Tone of reply")
 ):
-    """Generate a professional reply to an incoming message."""
+    """Generate a professional reply with quality analysis."""
     result = await generate_reply(
         original_email=original_email,
         replier_email=replier_email,
@@ -65,6 +66,8 @@ async def api_generate_reply(
         tone=tone
     )
     return result
+
+
 
 if __name__ == "__main__":
     import uvicorn
